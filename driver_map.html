@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Такси - Карта водителя</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #map { flex: 1; width: 100%; }
+
+        .status-bar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(30, 30, 30, 0.95);
+            padding: 12px 16px;
+            border-radius: 14px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #3a3a3a;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4CAF50;
+            flex-shrink: 0;
+            animation: pulse 2s infinite;
+        }
+        .status-dot.offline { background: #888; animation: none; }
+        .status-dot.sending { background: #4a7aff; animation: pulse 0.5s infinite; }
+        .status-dot.error { background: #ff4a4a; animation: none; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .status-text { flex: 1; font-size: 14px; font-weight: 500; }
+        .status-time { font-size: 12px; color: #888; flex-shrink: 0; }
+
+        .map-controls {
+            position: absolute;
+            right: 12px;
+            bottom: 170px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .map-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            background: rgba(30, 30, 30, 0.95);
+            border: 1px solid #444;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+            transition: all 0.2s;
+        }
+        .map-btn svg { width: 22px; height: 22px; fill: #fff; }
+        .map-btn:active { transform: scale(0.92); background: #3a3a3a; }
+        .map-btn.active { background: #4a7aff; border-color: #4a7aff; }
+
+        .bottom-panel {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(25, 25, 25, 0.97);
+            border-top: 1px solid #333;
+            border-radius: 20px 20px 0 0;
+            padding: 16px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .stat-card {
+            flex: 1;
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #3a3a3a;
+        }
+        .stat-card .value { font-size: 16px; font-weight: 700; color: #fff; }
+        .stat-card .label { font-size: 11px; color: #888; margin-top: 2px; }
+
+        .buttons-row { display: flex; gap: 10px; }
+
+        .btn {
+            flex: 1;
+            padding: 14px;
+            border-radius: 14px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        .btn svg { width: 18px; height: 18px; fill: currentColor; }
+        .btn:active { transform: scale(0.97); }
+
+        .btn-primary {
+            background: #4a7aff;
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(74,122,255,0.3);
+        }
+        .btn-primary:disabled {
+            background: #333;
+            color: #666;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #2a2a2a;
+            color: #ccc;
+            border: 1px solid #3a3a3a;
+        }
+        .btn-secondary.active {
+            background: #1a3a1a;
+            color: #4CAF50;
+            border-color: #4CAF50;
+        }
+
+        .auto-indicator {
+            text-align: center;
+            font-size: 12px;
+            color: #888;
+            margin-top: 10px;
+        }
+        .auto-indicator span { color: #4a7aff; }
+
+        .toast {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(40, 40, 40, 0.95);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 2000;
+            border: 1px solid #444;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .toast.visible { opacity: 1; }
+
+        .leaflet-control-attribution { display: none; }
+        .leaflet-control-zoom { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="status-bar">
+        <div class="status-dot" id="statusDot"></div>
+        <div class="status-text" id="statusText">Определяем местоположение...</div>
+        <div class="status-time" id="statusTime"></div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="map-controls">
+        <button class="map-btn" onclick="zoomIn()">
+            <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        </button>
+        <button class="map-btn" onclick="zoomOut()">
+            <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+        </button>
+        <button class="map-btn" id="centerBtn" onclick="centerOnMe()">
+            <svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+        </button>
+    </div>
+
+    <div class="bottom-panel">
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="value" id="accuracyVal">—</div>
+                <div class="label">Точность (м)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="speedVal">—</div>
+                <div class="label">Скорость (км/ч)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="updateCount">0</div>
+                <div class="label">Обновлений</div>
+            </div>
+        </div>
+
+        <div class="buttons-row">
+            <button class="btn btn-primary" id="sendBtn" onclick="sendLocationManual()" disabled>
+                <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
+                Отправить сейчас
+            </button>
+            <button class="btn btn-secondary" id="autoBtn" onclick="toggleAuto()">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
+                Авто: выкл
+            </button>
+        </div>
+
+        <div class="auto-indicator" id="autoIndicator">
+            Автообновление каждые <span id="intervalLabel">30</span> сек
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <script>
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.expand();
+            tg.ready();
+            tg.setHeaderColor('#1a1a1a');
+            tg.setBackgroundColor('#1a1a1a');
+            tg.BackButton.show();
+            tg.BackButton.onClick(() => tg.close());
+        }
+
+        let map = null;
+        let myMarker = null;
+        let accuracyCircle = null;
+        let watchId = null;
+        let autoInterval = null;
+        let currentLocation = null;
+        let isAutoEnabled = false;
+        let updatesSent = 0;
+        let isSending = false;
+        let lastSentTime = null;
+
+        const AUTO_INTERVAL_SEC = 30;
+        const DEFAULT_CENTER = [41.6168, 41.6367]; // Батуми
+
+        function getDriverIcon(heading) {
+            return L.divIcon({
+                html: `<div style="
+                    width:44px; height:44px; border-radius:50%;
+                    background:#4a7aff; border:3px solid #fff;
+                    box-shadow:0 3px 12px rgba(74,122,255,0.6);
+                    display:flex; align-items:center; justify-content:center;
+                    font-size:22px; transform:rotate(${heading || 0}deg);
+                ">🚕</div>`,
+                iconSize: [44, 44],
+                iconAnchor: [22, 22],
+                className: ''
+            });
+        }
+
+        function initMap() {
+            map = L.map('map', { zoomControl: false, attributionControl: false })
+                .setView(DEFAULT_CENTER, 13);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19
+            }).addTo(map);
+
+            map.on('dragstart', () => {
+                document.getElementById('centerBtn').classList.remove('active');
+            });
+
+            startTracking();
+        }
+
+        function startTracking() {
+            if (!navigator.geolocation) {
+                setStatus('error', '❌ Геолокация не поддерживается');
+                return;
+            }
+            setStatus('offline', 'Определяем местоположение...');
+            watchId = navigator.geolocation.watchPosition(
+                onLocationSuccess,
+                onLocationError,
+                { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+            );
+        }
+
+        function onLocationSuccess(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const accuracy = Math.round(position.coords.accuracy);
+            const speedMs = position.coords.speed;
+            const heading = position.coords.heading;
+
+            currentLocation = { lat, lng, accuracy, heading };
+
+            updateMarker(lat, lng, accuracy, heading);
+
+            document.getElementById('accuracyVal').textContent = accuracy;
+            document.getElementById('speedVal').textContent =
+                (speedMs !== null && speedMs >= 0) ? Math.round(speedMs * 3.6) : '0';
+            document.getElementById('sendBtn').disabled = false;
+
+            if (!isSending) {
+                setStatus('online', '🟢 На линии | Локация определена');
+            }
+        }
+
+        function onLocationError(error) {
+            const messages = {
+                1: '❌ Нет разрешения на геолокацию',
+                2: '❌ Геолокация недоступна',
+                3: '⚠️ Таймаут геолокации'
+            };
+            const msg = messages[error.code] || '❌ Ошибка геолокации';
+            setStatus('error', msg);
+            showToast(msg);
+        }
+
+        function updateMarker(lat, lng, accuracy, heading) {
+            if (myMarker) {
+                myMarker.setLatLng([lat, lng]);
+                myMarker.setIcon(getDriverIcon(heading));
+            } else {
+                myMarker = L.marker([lat, lng], {
+                    icon: getDriverIcon(heading),
+                    zIndexOffset: 1000
+                }).addTo(map);
+                map.setView([lat, lng], 15);
+                document.getElementById('centerBtn').classList.add('active');
+            }
+
+            if (accuracyCircle) {
+                accuracyCircle.setLatLng([lat, lng]);
+                accuracyCircle.setRadius(accuracy);
+            } else {
+                accuracyCircle = L.circle([lat, lng], {
+                    radius: accuracy,
+                    color: '#4a7aff',
+                    fillColor: '#4a7aff',
+                    fillOpacity: 0.1,
+                    weight: 1,
+                    opacity: 0.4
+                }).addTo(map);
+            }
+        }
+
+        function sendLocation(isAuto = false) {
+            if (!currentLocation) { showToast('❌ Локация ещё не определена'); return false; }
+            if (isSending) return false;
+
+            isSending = true;
+            document.getElementById('sendBtn').disabled = true;
+            setStatus('sending', '📡 Отправляем локацию...');
+
+            const payload = JSON.stringify({
+                action: 'driver_location',
+                lat: currentLocation.lat,
+                lon: currentLocation.lng,
+                accuracy: currentLocation.accuracy,
+                timestamp: Date.now()
+            });
+
+            try {
+                if (tg && tg.sendData) {
+                    tg.sendData(payload);
+                } else {
+                    console.log('Локация (тест):', payload);
+                }
+
+                updatesSent++;
+                lastSentTime = new Date();
+                document.getElementById('updateCount').textContent = updatesSent;
+                document.getElementById('statusTime').textContent = formatTime(lastSentTime);
+
+                setStatus('online', isAuto ? '🔄 Авто-обновление отправлено' : '✅ Локация отправлена');
+                showToast(isAuto ? '🔄 Авто-обновление' : '✅ Локация отправлена!');
+
+                setTimeout(() => {
+                    setStatus('online', '🟢 На линии | Ожидание заказов');
+                }, 2000);
+
+            } catch (e) {
+                console.error('Ошибка отправки:', e);
+                setStatus('error', '❌ Ошибка отправки');
+                showToast('❌ Ошибка отправки');
+            } finally {
+                isSending = false;
+                document.getElementById('sendBtn').disabled = !currentLocation;
+            }
+            return true;
+        }
+
+        function sendLocationManual() { sendLocation(false); }
+
+        function toggleAuto() {
+            isAutoEnabled = !isAutoEnabled;
+            const btn = document.getElementById('autoBtn');
+            const indicator = document.getElementById('autoIndicator');
+
+            if (isAutoEnabled) {
+                btn.classList.add('active');
+                btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg> Авто: вкл`;
+                indicator.innerHTML = `Авто-отправка каждые <span>${AUTO_INTERVAL_SEC}</span> сек ✅`;
+                sendLocation(true);
+                autoInterval = setInterval(() => {
+                    if (currentLocation) sendLocation(true);
+                }, AUTO_INTERVAL_SEC * 1000);
+                showToast(`✅ Авто-обновление каждые ${AUTO_INTERVAL_SEC} сек`);
+            } else {
+                btn.classList.remove('active');
+                btn.innerHTML = `<svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg> Авто: выкл`;
+                indicator.innerHTML = `Автообновление каждые <span>${AUTO_INTERVAL_SEC}</span> сек`;
+                if (autoInterval) { clearInterval(autoInterval); autoInterval = null; }
+                showToast('⏸ Авто-обновление отключено');
+            }
+        }
+
+        function centerOnMe() {
+            if (currentLocation) {
+                map.setView([currentLocation.lat, currentLocation.lng], 16, { animate: true });
+                document.getElementById('centerBtn').classList.add('active');
+            } else {
+                showToast('⏳ Ожидаем геолокацию...');
+            }
+        }
+
+        function zoomIn() { map.zoomIn(); }
+        function zoomOut() { map.zoomOut(); }
+
+        function setStatus(type, text) {
+            const dot = document.getElementById('statusDot');
+            dot.className = 'status-dot';
+            if (type !== 'online') dot.classList.add(type);
+            document.getElementById('statusText').textContent = text;
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('visible');
+            setTimeout(() => toast.classList.remove('visible'), 2500);
+        }
+
+        function formatTime(date) {
+            if (!date) return '';
+            return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        setInterval(() => {
+            if (lastSentTime) {
+                document.getElementById('statusTime').textContent = formatTime(lastSentTime);
+            }
+        }, 1000);
+
+        window.addEventListener('beforeunload', () => {
+            if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+            if (autoInterval) clearInterval(autoInterval);
+        });
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
